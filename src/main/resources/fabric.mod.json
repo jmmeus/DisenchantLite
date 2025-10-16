@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "id": "disenchantlite",
+  "version": "${version}",
+  "name": "DisenchantLite",
+  "description": "Disenchant tools into books, or split enchants from books (server-side only).",
+  "authors": ["lambhuna"],
+  "environment": "*",
+  "entrypoints": {
+    "main": ["net.lambhuna.disenchantlite.DisenchantLiteMod"]
+  },
+  "mixins": [
+    "disenchantlite.mixins.json"
+  ],
+  "depends": {
+    "fabricloader": ">=0.17.2",
+    "minecraft": "1.21.8"
+  }
+}

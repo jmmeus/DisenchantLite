@@ -1,0 +1,102 @@
+plugins {
+	id 'fabric-loom' version "${loom_version}"
+	id 'maven-publish'
+}
+
+// These properties are set in gradle.properties
+version = project.mod_version
+group = project.maven_group
+
+base {
+	archivesName = project.archives_base_name
+}
+
+// Set the version of Minecraft (target the latest 1.21.7)
+loom {
+	// Optional: Split client and server code for better compatibility
+	splitEnvironmentSourceSets()
+
+	mods {
+		"disenchantlite" {
+			sourceSet sourceSets.main
+			sourceSet sourceSets.client
+		}
+	}
+}
+
+repositories {
+	// Add repositories to retrieve artifacts from in here.
+	// You should only use this when depending on other mods because
+	// Loom adds the essential maven repositories to download Minecraft and libraries from automatically.
+	// See https://docs.gradle.org/current/userguide/declaring_repositories.html
+	// for more information about repositories.
+
+	maven { url 'https://maven.nucleoid.xyz' }
+}
+
+fabricApi {
+	configureDataGeneration()
+}
+
+dependencies {
+	// Minecraft version - Update to latest 1.21.7
+	minecraft "net.minecraft:minecraft:${project.minecraft_version}"
+
+	// Yarn mappings for deobfuscated Minecraft
+	mappings "net.fabricmc:yarn:${project.yarn_mappings}:v2"
+
+	// Fabric loader
+	modImplementation "net.fabricmc:fabric-loader:${project.loader_version}"
+
+	// Fabric API - CRITICAL: Note the mod ID changed from "fabric" to "fabric-api"
+	modImplementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_version}"
+}
+
+processResources {
+	inputs.property "version", project.version
+
+	filesMatching("fabric.mod.json") {
+		expand "version": project.version
+	}
+}
+
+tasks.withType(JavaCompile).configureEach {
+	it.options.release = 21
+}
+
+// Ensure Java compatibility
+java {
+	// Generate sources and javadoc jars
+	withSourcesJar()
+
+	// Java 21 is required for Minecraft 1.20.5+
+	toolchain.languageVersion = JavaLanguageVersion.of(21)
+	sourceCompatibility = JavaVersion.VERSION_21
+	targetCompatibility = JavaVersion.VERSION_21
+}
+
+jar {
+	inputs.property "archivesName", project.base.archivesName
+
+	from("LICENSE") {
+		rename { "${it}_${inputs.properties.archivesName}"}
+	}
+}
+
+// configure the maven publication
+publishing {
+	publications {
+		create("mavenJava", MavenPublication) {
+			artifactId = project.archives_base_name
+			from components.java
+		}
+	}
+
+	// See https://docs.gradle.org/current/userguide/publishing_maven.html for information on how to set up publishing.
+	repositories {
+		// Add repositories to publish to here.
+		// Notice: This block does NOT have the same function as the block in the top level.
+		// The repositories here will be used for publishing your artifact, not for
+		// retrieving dependencies.
+	}
+}
