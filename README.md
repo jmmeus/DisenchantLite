@@ -25,8 +25,8 @@ Both operations consume books and XP levels based on enchantment rarity.
 
 ## Compatibility
 
-- Minecraft: 1.21.8+
-- Fabric Loader: 0.17.2+
+- Minecraft: 1.21.9 - 1.21.10
+- Fabric Loader: 0.17.3+
 - Server-side only (will work client-side in singleplayer too)
 
 ## License

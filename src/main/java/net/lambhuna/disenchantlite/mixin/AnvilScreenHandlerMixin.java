@@ -141,7 +141,7 @@ public abstract class AnvilScreenHandlerMixin {
                 this.updateResult();
 
                 // Play cat sound instead of anvil
-                player.getWorld().playSound(
+                player.getEntityWorld().playSound(
                         null,
                         player.getBlockPos(),
                         SoundEvents.ENTITY_CAT_AMBIENT,
@@ -191,7 +191,7 @@ public abstract class AnvilScreenHandlerMixin {
                     this.updateResult();
 
                     // Play cat sound instead of anvil
-                    player.getWorld().playSound(
+                    player.getEntityWorld().playSound(
                             null,
                             player.getBlockPos(),
                             SoundEvents.ENTITY_CAT_AMBIENT,
