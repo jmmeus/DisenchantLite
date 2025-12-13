@@ -140,11 +140,11 @@ public abstract class AnvilScreenHandlerMixin {
                 // Recompute the result (this will update the UI so the next split output appears)
                 this.updateResult();
 
-                // Play cat sound instead of anvil
+                // Play anvil sound
                 player.getWorld().playSound(
                         null,
                         player.getBlockPos(),
-                        SoundEvents.ENTITY_CAT_AMBIENT,
+                        SoundEvents.BLOCK_ANVIL_USE,
                         SoundCategory.PLAYERS,
                         1.0F, 1.0F
                 );
@@ -190,11 +190,11 @@ public abstract class AnvilScreenHandlerMixin {
                     // Recompute the result (this will update the UI so the next split output appears)
                     this.updateResult();
 
-                    // Play cat sound instead of anvil
+                    // Play anvil sound
                     player.getWorld().playSound(
                             null,
                             player.getBlockPos(),
-                            SoundEvents.ENTITY_CAT_AMBIENT,
+                            SoundEvents.BLOCK_ANVIL_USE,
                             SoundCategory.PLAYERS,
                             1.0F, 1.0F
                     );
