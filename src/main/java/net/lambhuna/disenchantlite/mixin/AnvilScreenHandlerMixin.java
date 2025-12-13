@@ -4,14 +4,20 @@ import net.lambhuna.disenchantlite.util.EnchantmentUtils;
 import net.minecraft.component.DataComponentTypes;
 import net.minecraft.component.type.ItemEnchantmentsComponent;
 import net.minecraft.entity.player.PlayerEntity;
+import net.minecraft.entity.player.PlayerInventory;
 import net.minecraft.inventory.CraftingResultInventory;
 import net.minecraft.inventory.Inventory;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
+import net.minecraft.network.packet.s2c.play.ScreenHandlerPropertyUpdateS2CPacket;
 import net.minecraft.registry.entry.RegistryEntry;
 import net.minecraft.screen.AnvilScreenHandler;
+import net.minecraft.screen.ForgingScreenHandler;
 import net.minecraft.screen.Property;
 import net.minecraft.screen.ScreenHandlerContext;
+import net.minecraft.screen.ScreenHandlerType;
+import net.minecraft.screen.slot.ForgingSlotsManager;
+import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.sound.SoundEvents;
 import net.minecraft.sound.SoundCategory;
 import org.spongepowered.asm.mixin.Final;
@@ -22,16 +28,40 @@ import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 import java.util.Iterator;
+import org.jetbrains.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 @Mixin(AnvilScreenHandler.class)
-public abstract class AnvilScreenHandlerMixin {
+public abstract class AnvilScreenHandlerMixin extends ForgingScreenHandler {
     private static final Logger LOGGER = LoggerFactory.getLogger("DisenchantLite");
+
+    // Dummy constructor required when extending parent class
+    public AnvilScreenHandlerMixin(@Nullable ScreenHandlerType<?> type, int syncId,
+                                   PlayerInventory playerInventory,
+                                   ScreenHandlerContext context,
+                                   ForgingSlotsManager forgingSlotsManager) {
+        super(type, syncId, playerInventory, context, forgingSlotsManager);
+    }
 
     @Shadow private Property levelCost;
 
-    @Shadow private void updateResult() { throw new AssertionError(); }
+    @Shadow public void updateResult() { throw new AssertionError(); }
+
+    /**
+     * Force synchronization of the level cost to the client.
+     * This bypasses the dirty-check mechanism to ensure the client displays the cost correctly
+     * even when vanilla client code sets an invalid recipe during slot updates.
+     */
+    private void forceSyncCost(int cost) {
+        this.levelCost.set(cost);
+        if (this.player instanceof ServerPlayerEntity serverPlayer) {
+            AnvilScreenHandler handler = (AnvilScreenHandler)(Object)this;
+            serverPlayer.networkHandler.sendPacket(
+                new ScreenHandlerPropertyUpdateS2CPacket(handler.syncId, 0, cost)
+            );
+        }
+    }
 
 
     @Inject(method = "updateResult", at = @At("HEAD"), cancellable = true)
@@ -56,7 +86,7 @@ public abstract class AnvilScreenHandlerMixin {
 
                 // Set the result
                 handler.getSlot(2).setStack(newBook);
-                this.levelCost.set(EnchantmentUtils.calculateCost(enchantments));
+                forceSyncCost(EnchantmentUtils.calculateCost(enchantments));
 
 //                LOGGER.info("DisenchantLite: Set enchanted book as output with cost {}", EnchantmentUtils.calculateCost(enchantments));
 
@@ -87,7 +117,7 @@ public abstract class AnvilScreenHandlerMixin {
 
                     // Set the result
                     handler.getSlot(2).setStack(newBook);
-                    this.levelCost.set(EnchantmentUtils.calculateCost(firstBuilder.build()));
+                    forceSyncCost(EnchantmentUtils.calculateCost(firstBuilder.build()));
 
 //                    LOGGER.info("DisenchantLite: Set single enchantment book as output with cost {}",
 //                            EnchantmentUtils.calculateCost(firstBuilder.build()));
@@ -120,6 +150,9 @@ public abstract class AnvilScreenHandlerMixin {
             if (!enchantments.isEmpty()) {
 //                LOGGER.info("DisenchantLite: onTakeOutput - disenchanted tool + consume one book");
 
+                // Save the cost BEFORE updateResult() overwrites it
+                int costToDeduct = this.levelCost.get();
+
                 // Create clean copy of the left item (same item and damage, but no enchantments)
                 ItemStack cleanLeft = left.copy();
                 EnchantmentUtils.setEnchantments(ItemEnchantmentsComponent.DEFAULT, cleanLeft);
@@ -149,6 +182,11 @@ public abstract class AnvilScreenHandlerMixin {
                         1.0F, 1.0F
                 );
 
+                // Deduct experience levels (server-side only, skip creative mode)
+                if (player instanceof ServerPlayerEntity && !player.getAbilities().creativeMode) {
+                    player.addExperienceLevels(-costToDeduct);
+                }
+
                 // Prevent vanilla onTakeOutput from running
                 ci.cancel();
                 return;
@@ -160,6 +198,9 @@ public abstract class AnvilScreenHandlerMixin {
             ItemEnchantmentsComponent enchantments = EnchantmentUtils.getEnchantments(left);
             if (enchantments.getSize() > 1) {
 //                LOGGER.info("DisenchantLite: onTakeOutput - splitting enchanted book and consuming one book");
+
+                // Save the cost BEFORE updateResult() overwrites it
+                int costToDeduct = this.levelCost.get();
 
                 // Build remaining enchantments (skip the first entry)
                 var iterator = enchantments.getEnchantmentEntries().iterator();
@@ -198,6 +239,11 @@ public abstract class AnvilScreenHandlerMixin {
                             SoundCategory.PLAYERS,
                             1.0F, 1.0F
                     );
+
+                    // Deduct experience levels (server-side only, skip creative mode)
+                    if (player instanceof ServerPlayerEntity && !player.getAbilities().creativeMode) {
+                        player.addExperienceLevels(-costToDeduct);
+                    }
 
                     ci.cancel();
                     return;
