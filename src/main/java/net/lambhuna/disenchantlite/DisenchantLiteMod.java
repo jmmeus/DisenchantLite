@@ -40,7 +40,13 @@ public class DisenchantLiteMod implements ModInitializer {
         CommandRegistrationCallback.EVENT.register((dispatcher, registryAccess, environment) -> {
             dispatcher.register(literal("disenchanttest")
                     // The command requires a permission level of 2 (operator).
-                    .requires(source -> source.hasPermissionLevel(2))
+                    .requires(source -> {
+                        var perm = source.getPermissions();
+                        if (perm instanceof net.minecraft.command.permission.LeveledPermissionPredicate leveled) {
+                            return leveled.getLevel().getLevel() >= 2;
+                        }
+                        return false;
+                    })
                     // Executable part for when no player is specified (targets the command runner).
                     .executes(this::runGiveTestItems)
                     // Adds a sub-command to target a specific player.
