@@ -1,25 +1,23 @@
 package net.lambhuna.disenchantlite.mixin;
 
 import net.lambhuna.disenchantlite.util.EnchantmentUtils;
-import net.minecraft.component.DataComponentTypes;
-import net.minecraft.component.type.ItemEnchantmentsComponent;
-import net.minecraft.entity.player.PlayerEntity;
-import net.minecraft.entity.player.PlayerInventory;
-import net.minecraft.inventory.CraftingResultInventory;
-import net.minecraft.inventory.Inventory;
-import net.minecraft.item.ItemStack;
-import net.minecraft.item.Items;
-import net.minecraft.registry.entry.RegistryEntry;
-import net.minecraft.screen.AnvilScreenHandler;
-import net.minecraft.screen.ForgingScreenHandler;
-import net.minecraft.screen.Property;
-import net.minecraft.screen.ScreenHandlerContext;
-import net.minecraft.screen.ScreenHandlerType;
-import net.minecraft.screen.slot.ForgingSlotsManager;
-import net.minecraft.sound.SoundEvents;
-import net.minecraft.sound.SoundCategory;
-import net.minecraft.network.packet.s2c.play.ScreenHandlerPropertyUpdateS2CPacket;
-import net.minecraft.server.network.ServerPlayerEntity;
+import net.minecraft.core.Holder;
+import net.minecraft.core.component.DataComponents;
+import net.minecraft.network.protocol.game.ClientboundContainerSetDataPacket;
+import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.sounds.SoundEvents;
+import net.minecraft.sounds.SoundSource;
+import net.minecraft.world.entity.player.Inventory;
+import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.inventory.AnvilMenu;
+import net.minecraft.world.inventory.ContainerLevelAccess;
+import net.minecraft.world.inventory.DataSlot;
+import net.minecraft.world.inventory.ItemCombinerMenu;
+import net.minecraft.world.inventory.ItemCombinerMenuSlotDefinition;
+import net.minecraft.world.inventory.MenuType;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
+import net.minecraft.world.item.enchantment.ItemEnchantments;
 import org.spongepowered.asm.mixin.Final;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
@@ -32,21 +30,21 @@ import org.jetbrains.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-@Mixin(AnvilScreenHandler.class)
-public abstract class AnvilScreenHandlerMixin extends ForgingScreenHandler {
+@Mixin(AnvilMenu.class)
+public abstract class AnvilScreenHandlerMixin extends ItemCombinerMenu {
     private static final Logger LOGGER = LoggerFactory.getLogger("DisenchantLite");
 
     // Dummy constructor required when extending parent class
-    public AnvilScreenHandlerMixin(@Nullable ScreenHandlerType<?> type, int syncId,
-                                   PlayerInventory playerInventory,
-                                   ScreenHandlerContext context,
-                                   ForgingSlotsManager forgingSlotsManager) {
+    public AnvilScreenHandlerMixin(@Nullable MenuType<?> type, int syncId,
+                                   Inventory playerInventory,
+                                   ContainerLevelAccess context,
+                                   ItemCombinerMenuSlotDefinition forgingSlotsManager) {
         super(type, syncId, playerInventory, context, forgingSlotsManager);
     }
 
-    @Shadow private Property levelCost;
+    @Shadow private DataSlot cost;
 
-    @Shadow public void updateResult() { throw new AssertionError(); }
+    @Shadow public void createResult() { throw new AssertionError(); }
 
     /**
      * Force synchronization of the level cost to the client.
@@ -54,29 +52,29 @@ public abstract class AnvilScreenHandlerMixin extends ForgingScreenHandler {
      * even when vanilla client code sets an invalid recipe during slot updates.
      */
     private void forceSyncCost(int cost) {
-        this.levelCost.set(cost);
-        if (this.player instanceof ServerPlayerEntity serverPlayer) {
-            AnvilScreenHandler handler = (AnvilScreenHandler)(Object)this;
-            serverPlayer.networkHandler.sendPacket(
-                new ScreenHandlerPropertyUpdateS2CPacket(handler.syncId, 0, cost)
+        this.cost.set(cost);
+        if (this.player instanceof ServerPlayer serverPlayer) {
+            AnvilMenu handler = (AnvilMenu)(Object)this;
+            serverPlayer.connection.send(
+                new ClientboundContainerSetDataPacket(handler.containerId, 0, cost)
             );
         }
     }
 
 
-    @Inject(method = "updateResult", at = @At("HEAD"), cancellable = true)
+    @Inject(method = "createResult", at = @At("HEAD"), cancellable = true)
     private void disenchantingUpdate(CallbackInfo ci) {
-        AnvilScreenHandler handler = (AnvilScreenHandler)(Object)this;
-        ItemStack left = handler.getSlot(0).getStack();
-        ItemStack right = handler.getSlot(1).getStack();
+        AnvilMenu handler = (AnvilMenu)(Object)this;
+        ItemStack left = handler.getSlot(0).getItem();
+        ItemStack right = handler.getSlot(1).getItem();
 
 //        LOGGER.info("DisenchantLite: Checking anvil operation - Left: {}, Right: {}",
 //                left.isEmpty() ? "empty" : left.getItem().toString(),
 //                right.isEmpty() ? "empty" : right.getItem().toString());
 
         // Case A: Tool/armor + Book → Enchanted Book + Clean Tool
-        if (!left.isEmpty() && right.isOf(Items.BOOK) && !left.isOf(Items.ENCHANTED_BOOK)) {
-            ItemEnchantmentsComponent enchantments = EnchantmentUtils.getEnchantments(left);
+        if (!left.isEmpty() && right.is(Items.BOOK) && !left.is(Items.ENCHANTED_BOOK)) {
+            ItemEnchantments enchantments = EnchantmentUtils.getEnchantments(left);
             if (!enchantments.isEmpty()) {
 //                LOGGER.info("DisenchantLite: Found tool with {} enchantments, creating enchanted book", enchantments.getSize());
 
@@ -85,7 +83,7 @@ public abstract class AnvilScreenHandlerMixin extends ForgingScreenHandler {
                 EnchantmentUtils.setEnchantments(enchantments, newBook);
 
                 // Set the result
-                handler.getSlot(2).setStack(newBook);
+                handler.getSlot(2).setByPlayer(newBook);
                 forceSyncCost(EnchantmentUtils.calculateCost(enchantments));
 
 //                LOGGER.info("DisenchantLite: Set enchanted book as output with cost {}", EnchantmentUtils.calculateCost(enchantments));
@@ -97,27 +95,27 @@ public abstract class AnvilScreenHandlerMixin extends ForgingScreenHandler {
         }
 
         // Case B: Enchanted book split (must have ≥2 enchants)
-        if (left.isOf(Items.ENCHANTED_BOOK) && right.isOf(Items.BOOK) && !right.isOf(Items.ENCHANTED_BOOK)) {
-            ItemEnchantmentsComponent enchantments = EnchantmentUtils.getEnchantments(left);
-            if (enchantments.getSize() > 1) {
+        if (left.is(Items.ENCHANTED_BOOK) && right.is(Items.BOOK) && !right.is(Items.ENCHANTED_BOOK)) {
+            ItemEnchantments enchantments = EnchantmentUtils.getEnchantments(left);
+            if (enchantments.size() > 1) {
 //                LOGGER.info("DisenchantLite: Found enchanted book with {} enchantments, splitting", enchantments.getSize());
 
-                var iterator = enchantments.getEnchantmentEntries().iterator();
+                var iterator = enchantments.entrySet().iterator();
                 if (iterator.hasNext()) {
                     var firstEntry = iterator.next();
-                    RegistryEntry<net.minecraft.enchantment.Enchantment> firstEnchantment = firstEntry.getKey();
+                    Holder<net.minecraft.world.item.enchantment.Enchantment> firstEnchantment = firstEntry.getKey();
                     int firstLevel = firstEntry.getIntValue();
 
                     // Create new book with first enchantment only
-                    ItemEnchantmentsComponent.Builder firstBuilder = new ItemEnchantmentsComponent.Builder(ItemEnchantmentsComponent.DEFAULT);
-                    firstBuilder.add(firstEnchantment, firstLevel);
+                    ItemEnchantments.Mutable firstBuilder = new ItemEnchantments.Mutable(ItemEnchantments.EMPTY);
+                    firstBuilder.upgrade(firstEnchantment, firstLevel);
 
                     ItemStack newBook = new ItemStack(Items.ENCHANTED_BOOK);
-                    EnchantmentUtils.setEnchantments(firstBuilder.build(), newBook);
+                    EnchantmentUtils.setEnchantments(firstBuilder.toImmutable(), newBook);
 
                     // Set the result
-                    handler.getSlot(2).setStack(newBook);
-                    forceSyncCost(EnchantmentUtils.calculateCost(firstBuilder.build()));
+                    handler.getSlot(2).setByPlayer(newBook);
+                    forceSyncCost(EnchantmentUtils.calculateCost(firstBuilder.toImmutable()));
 
 //                    LOGGER.info("DisenchantLite: Set single enchantment book as output with cost {}",
 //                            EnchantmentUtils.calculateCost(firstBuilder.build()));
@@ -138,53 +136,53 @@ public abstract class AnvilScreenHandlerMixin extends ForgingScreenHandler {
      * We must replace/modify the input stacks here (vanilla would otherwise perform its own logic,
      * which does not match our custom result logic).
      */
-    @Inject(method = "onTakeOutput", at = @At("HEAD"), cancellable = true)
-    private void onTakeOutput(PlayerEntity player, ItemStack result, CallbackInfo ci) {
-        AnvilScreenHandler handler = (AnvilScreenHandler)(Object)this;
-        ItemStack left = handler.getSlot(0).getStack();
-        ItemStack right = handler.getSlot(1).getStack();
+    @Inject(method = "onTake", at = @At("HEAD"), cancellable = true)
+    private void onTakeOutput(Player player, ItemStack result, CallbackInfo ci) {
+        AnvilMenu handler = (AnvilMenu)(Object)this;
+        ItemStack left = handler.getSlot(0).getItem();
+        ItemStack right = handler.getSlot(1).getItem();
 
         // Case A: Tool/armor + Book -> give enchanted book, return clean tool, consume one book
-        if (!left.isEmpty() && right.isOf(Items.BOOK) && !left.isOf(Items.ENCHANTED_BOOK)) {
-            ItemEnchantmentsComponent enchantments = EnchantmentUtils.getEnchantments(left);
+        if (!left.isEmpty() && right.is(Items.BOOK) && !left.is(Items.ENCHANTED_BOOK)) {
+            ItemEnchantments enchantments = EnchantmentUtils.getEnchantments(left);
             if (!enchantments.isEmpty()) {
 //                LOGGER.info("DisenchantLite: onTakeOutput - disenchanted tool + consume one book");
 
                 // Save the cost BEFORE updateResult() overwrites it
-                int costToDeduct = this.levelCost.get();
+                int costToDeduct = this.cost.get();
 
                 // Create clean copy of the left item (same item and damage, but no enchantments)
                 ItemStack cleanLeft = left.copy();
-                EnchantmentUtils.setEnchantments(ItemEnchantmentsComponent.DEFAULT, cleanLeft);
-                cleanLeft.set(DataComponentTypes.REPAIR_COST, 0);
+                EnchantmentUtils.setEnchantments(ItemEnchantments.EMPTY, cleanLeft);
+                cleanLeft.set(DataComponents.REPAIR_COST, 0);
 
                 // Put the clean tool back into slot 0
-                handler.getSlot(0).setStack(cleanLeft);
+                handler.getSlot(0).setByPlayer(cleanLeft);
 
                 // Decrement one book from slot 1
                 if (!right.isEmpty()) {
-                    right.decrement(1);
-                    handler.getSlot(1).setStack(right.isEmpty() ? ItemStack.EMPTY : right);
+                    right.shrink(1);
+                    handler.getSlot(1).setByPlayer(right.isEmpty() ? ItemStack.EMPTY : right);
                 }
 
                 // Clear the result slot (player receives 'result' already)
-                handler.getSlot(2).setStack(ItemStack.EMPTY);
+                handler.getSlot(2).setByPlayer(ItemStack.EMPTY);
 
                 // Recompute the result (this will update the UI so the next split output appears)
-                this.updateResult();
+                this.createResult();
 
                 // Play anvil sound
-                player.getEntityWorld().playSound(
+                player.level().playSound(
                         null,
-                        player.getBlockPos(),
-                        SoundEvents.BLOCK_ANVIL_USE,
-                        SoundCategory.PLAYERS,
+                        player.blockPosition(),
+                        SoundEvents.ANVIL_USE,
+                        SoundSource.PLAYERS,
                         1.0F, 1.0F
                 );
 
                 // Deduct experience levels (server-side only, skip creative mode)
-                if (player instanceof ServerPlayerEntity && !player.getAbilities().creativeMode) {
-                    player.addExperienceLevels(-costToDeduct);
+                if (player instanceof ServerPlayer && !player.getAbilities().instabuild) {
+                    player.giveExperienceLevels(-costToDeduct);
                 }
 
                 // Prevent vanilla onTakeOutput from running
@@ -194,55 +192,55 @@ public abstract class AnvilScreenHandlerMixin extends ForgingScreenHandler {
         }
 
         // Case B: Enchanted book split -> remove the first enchant from left, return remaining book, consume one book
-        if (left.isOf(Items.ENCHANTED_BOOK) && right.isOf(Items.BOOK) && !right.isOf(Items.ENCHANTED_BOOK)) {
-            ItemEnchantmentsComponent enchantments = EnchantmentUtils.getEnchantments(left);
-            if (enchantments.getSize() > 1) {
+        if (left.is(Items.ENCHANTED_BOOK) && right.is(Items.BOOK) && !right.is(Items.ENCHANTED_BOOK)) {
+            ItemEnchantments enchantments = EnchantmentUtils.getEnchantments(left);
+            if (enchantments.size() > 1) {
 //                LOGGER.info("DisenchantLite: onTakeOutput - splitting enchanted book and consuming one book");
 
                 // Save the cost BEFORE updateResult() overwrites it
-                int costToDeduct = this.levelCost.get();
+                int costToDeduct = this.cost.get();
 
                 // Build remaining enchantments (skip the first entry)
-                var iterator = enchantments.getEnchantmentEntries().iterator();
+                var iterator = enchantments.entrySet().iterator();
                 if (iterator.hasNext()) {
                     // skip first
                     var first = iterator.next();
 
-                    ItemEnchantmentsComponent.Builder remainingBuilder = new ItemEnchantmentsComponent.Builder(ItemEnchantmentsComponent.DEFAULT);
+                    ItemEnchantments.Mutable remainingBuilder = new ItemEnchantments.Mutable(ItemEnchantments.EMPTY);
                     while (iterator.hasNext()) {
                         var entry = iterator.next();
-                        remainingBuilder.add(entry.getKey(), entry.getIntValue());
+                        remainingBuilder.upgrade(entry.getKey(), entry.getIntValue());
                     }
 
                     // Put remaining enchanted book back into slot 0
                     ItemStack remainingBook = new ItemStack(Items.ENCHANTED_BOOK);
-                    EnchantmentUtils.setEnchantments(remainingBuilder.build(), remainingBook);
-                    handler.getSlot(0).setStack(remainingBook);
+                    EnchantmentUtils.setEnchantments(remainingBuilder.toImmutable(), remainingBook);
+                    handler.getSlot(0).setByPlayer(remainingBook);
 
                     // Decrement one book from slot 1
                     if (!right.isEmpty()) {
-                        right.decrement(1);
-                        handler.getSlot(1).setStack(right.isEmpty() ? ItemStack.EMPTY : right);
+                        right.shrink(1);
+                        handler.getSlot(1).setByPlayer(right.isEmpty() ? ItemStack.EMPTY : right);
                     }
 
                     // Clear the result slot
-                    handler.getSlot(2).setStack(ItemStack.EMPTY);
+                    handler.getSlot(2).setByPlayer(ItemStack.EMPTY);
 
                     // Recompute the result (this will update the UI so the next split output appears)
-                    this.updateResult();
+                    this.createResult();
 
                     // Play anvil sound
-                    player.getEntityWorld().playSound(
+                    player.level().playSound(
                             null,
-                            player.getBlockPos(),
-                            SoundEvents.BLOCK_ANVIL_USE,
-                            SoundCategory.PLAYERS,
+                            player.blockPosition(),
+                            SoundEvents.ANVIL_USE,
+                            SoundSource.PLAYERS,
                             1.0F, 1.0F
                     );
 
                     // Deduct experience levels (server-side only, skip creative mode)
-                    if (player instanceof net.minecraft.server.network.ServerPlayerEntity && !player.getAbilities().creativeMode) {
-                        player.addExperienceLevels(-costToDeduct);
+                    if (player instanceof net.minecraft.server.level.ServerPlayer && !player.getAbilities().instabuild) {
+                        player.giveExperienceLevels(-costToDeduct);
                     }
 
                     ci.cancel();

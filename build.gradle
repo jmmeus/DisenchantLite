@@ -42,8 +42,8 @@ dependencies {
 	// Minecraft version - Update to latest 1.21.7
 	minecraft "net.minecraft:minecraft:${project.minecraft_version}"
 
-	// Yarn mappings for deobfuscated Minecraft
-	mappings "net.fabricmc:yarn:${project.yarn_mappings}:v2"
+	// Official Mojang mappings (mojmap)
+	mappings loom.officialMojangMappings()
 
 	// Fabric loader
 	modImplementation "net.fabricmc:fabric-loader:${project.loader_version}"
