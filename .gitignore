@@ -174,5 +174,6 @@ run/
 
 # Custom ignores
 .claude/
+CLAUDE.md
 
 # End of https://www.toptal.com/developers/gitignore/api/intellij,java,gradle
